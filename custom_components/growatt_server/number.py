@@ -79,48 +79,6 @@ MIN_NUMBER_TYPES: tuple[GrowattNumberEntityDescription, ...] = (
     ),
 )
 
-MIX_NUMBER_TYPES: tuple[GrowattNumberEntityDescription, ...] = (
-    GrowattNumberEntityDescription(
-        key="charge_power",
-        translation_key="charge_power",
-        api_key="chargePowerCommand",  # Key returned by V1 API
-        write_key="charge_power",  # Key used to write parameter
-        native_step=1,
-        native_min_value=0,
-        native_max_value=100,
-        native_unit_of_measurement=PERCENTAGE,
-    ),
-    GrowattNumberEntityDescription(
-        key="charge_stop_soc",
-        translation_key="charge_stop_soc",
-        api_key="wchargeSOCLowLimit",  # Key returned by V1 API
-        write_key="charge_stop_soc",  # Key used to write parameter
-        native_step=1,
-        native_min_value=0,
-        native_max_value=100,
-        native_unit_of_measurement=PERCENTAGE,
-    ),
-    GrowattNumberEntityDescription(
-        key="discharge_power",
-        translation_key="discharge_power",
-        api_key="disChargePowerCommand",  # Key returned by V1 API
-        write_key="discharge_power",  # Key used to write parameter
-        native_step=1,
-        native_min_value=0,
-        native_max_value=100,
-        native_unit_of_measurement=PERCENTAGE,
-    ),
-    GrowattNumberEntityDescription(
-        key="discharge_stop_soc",
-        translation_key="discharge_stop_soc",
-        api_key="wdisChargeSOCLowLimit",  # Key returned by V1 API
-        write_key="discharge_stop_soc",  # Key used to write parameter
-        native_step=1,
-        native_min_value=0,
-        native_max_value=100,
-        native_unit_of_measurement=PERCENTAGE,
-    ),
-)
 
 class GrowattNumber(CoordinatorEntity[GrowattCoordinator], NumberEntity):
     """Representation of a Growatt number."""
@@ -161,8 +119,7 @@ class GrowattNumber(CoordinatorEntity[GrowattCoordinator], NumberEntity):
 
             # Use V1 API to write parameter
             await self.hass.async_add_executor_job(
-                self.coordinator.api.write_parameter,
-                self.coordinator.device_type,
+                self.coordinator.api.min_write_parameter,
                 self.coordinator.device_id,
                 parameter_id,
                 int(value),
@@ -194,17 +151,19 @@ async def async_setup_entry(
 
     entities: list[GrowattNumber] = []
 
-    # Add number entities for each MIN device (only supported with V1 API)
+    # Add number entities for each MIN/SPH device (only supported with V1 API)
+    # MIN inverters map to "tlx" device type, SPH inverters map to "mix" device type
     for device_coordinator in runtime_data.devices.values():
         if (
-            device_coordinator.api_version == "v1"
+            device_coordinator.device_type in ("tlx", "mix")
+            and device_coordinator.api_version == "v1"
         ):
             entities.extend(
                 GrowattNumber(
                     coordinator=device_coordinator,
                     description=description,
                 )
-                for description in MIX_NUMBER_TYPES
+                for description in MIN_NUMBER_TYPES
             )
 
     async_add_entities(entities)

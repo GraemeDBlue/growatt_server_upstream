@@ -1,9 +1,10 @@
 """The Growatt server PV inverter sensor integration."""
 
 import asyncio
-import logging
 from collections.abc import Mapping
+import logging
 
+import growattServer
 import requests
 import voluptuous as vol
 
@@ -15,10 +16,8 @@ from homeassistant.exceptions import (
     ConfigEntryError,
     HomeAssistantError,
 )
-from homeassistant.helpers import selector
+from homeassistant.helpers import config_validation as cv, selector
 from homeassistant.util import dt as dt_util
-
-import growattServer
 
 from .const import (
     BATT_MODE_MAP,
@@ -104,8 +103,7 @@ def get_device_list_classic(
 def get_device_list_v1(
     api, config: Mapping[str, str]
 ) -> tuple[list[dict[str, str]], str]:
-    """
-    Device list logic for Open API V1.
+    """Device list logic for Open API V1.
 
     Note: Plant selection (including auto-selection if only one plant exists)
     is handled in the config flow before this function is called. This function
@@ -113,64 +111,61 @@ def get_device_list_v1(
     """
     plant_id = config[CONF_PLANT_ID]
     try:
+        # Use library's get_devices() which returns GrowattDevice objects
         devices = api.get_devices(plant_id)
     except growattServer.GrowattV1ApiError as e:
-        error_code = getattr(e, "error_code", None)
-        error_msg = getattr(e, "error_msg", None)
-        msg = (
-            f"API error during device list: {e} "
-            f"(Code: {error_code}, "
-            f"Message: {error_msg})"
-        )
-        raise ConfigEntryError(msg) from e
+        raise ConfigEntryError(
+            f"API error during device list: {e} (Code: {getattr(e, 'error_code', None)}, Message: {getattr(e, 'error_msg', None)})"
+        ) from e
 
-    # Only MIX (type =5 ) MIN (type = 7)  device support implemented in current V1 API
-    # Only include supported device types: MIX (type=5) and MIN (type=7)
+    # Map DeviceType enum to HA device type string
+    # Important: We map to "tlx" and "mix" to maintain consistency with Classic API
+    # This ensures both APIs use the same sensor definitions (TLX_SENSOR_TYPES, MIX_SENSOR_TYPES)
+    from growattServer import DeviceType
+
+    device_type_mapping = {
+        DeviceType.MIN_TLX: "tlx",  # Type 7: MIN/TLX inverters → use TLX sensors
+        DeviceType.SPH_MIX: "mix",  # Type 5: MIX/SPH inverters → use MIX sensors
+    }
+
     supported_devices = []
     for device in devices:
-        device_type = device.device_type
-        device_sn = device.device_sn
-        # Use integer values directly if MIX and MIN are not defined in DeviceType
-        if device_type == growattServer.DeviceType.SPH_MIX:
+        device_type_str = device_type_mapping.get(device.device_type)
+        if device_type_str:
             supported_devices.append(
                 {
-                    "deviceSn": device_sn,
-                    "deviceType": "mix",
+                    "deviceSn": device.device_sn,
+                    "deviceType": device_type_str,
+                    "deviceObject": device,  # Store the GrowattDevice object for V1 API
                 }
             )
-        elif device_type == growattServer.DeviceType.MIN_TLX:
-            supported_devices.append(
-                {
-                    "deviceSn": device_sn,
-                    "deviceType": "min",
-                }
-            )
-
-    for device in devices:
-        if device.device_type not in (
-            growattServer.DeviceType.SPH_MIX,
-            growattServer.DeviceType.MIN_TLX,
-        ):
-            _LOGGER.warning(
-                "Device %s with type %s not supported in Open API V1, skipping",
+            _LOGGER.debug(
+                "Device %s (model: %s, type: %s) mapped to deviceType: %s",
                 device.device_sn,
+                device.model,
+                device.device_type,
+                device_type_str,
+            )
+        else:
+            _LOGGER.warning(
+                "Device %s (model: %s) with type %s not supported, skipping",
+                device.device_sn,
+                device.model,
                 device.device_type,
             )
+
     return supported_devices, plant_id
 
 
 def get_device_list(
-    api: "growattServer.GrowattApi",
-    config: Mapping[str, str],
-    api_version: str,
+    api, config: Mapping[str, str], api_version: str
 ) -> tuple[list[dict[str, str]], str]:
     """Dispatch to correct device list logic based on API version."""
     if api_version == "v1":
         return get_device_list_v1(api, config)
     if api_version == "classic":
         return get_device_list_classic(api, config)
-    msg = f"Unknown API version: {api_version}"
-    raise ConfigEntryError(msg)
+    raise ConfigEntryError(f"Unknown API version: {api_version}")
 
 
 async def async_setup_entry(
@@ -442,10 +437,15 @@ async def async_setup_entry(
     # Create coordinators for each device
     device_coordinators = {
         device["deviceSn"]: GrowattCoordinator(
-            hass, config_entry, device["deviceSn"], device["deviceType"], plant_id
+            hass,
+            config_entry,
+            device["deviceSn"],
+            device["deviceType"],
+            plant_id,
+            device.get("deviceObject"),  # Pass GrowattDevice object for V1 API
         )
         for device in devices
-        if device["deviceType"] in ["inverter", "tlx", "storage", "mix", "min"]
+        if device["deviceType"] in ["inverter", "tlx", "storage", "mix"]
     }
 
     # Perform the first refresh for the total coordinator
@@ -464,7 +464,7 @@ async def async_setup_entry(
     # Set up all the entities
     await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
 
-    # Register services for MIN/TLX devices (TOU settings)
+    # Register services for V1 API devices (TOU settings)
     await _async_register_services(hass, config_entry, device_coordinators)
 
     _LOGGER.info(
@@ -504,42 +504,26 @@ async def _async_register_services(
 
     _LOGGER.info("Found V1 API device(s), registering TOU services")
 
-    def get_coordinator(device_id: str | None = None) -> GrowattCoordinator:
-        """Get coordinator by device_id with consistent behavior."""
-        if device_id is None:
-            if len(has_v1_device) == 1:
-                # Only one device - return it
-                return next(iter(has_v1_device.values()))
-            # Multiple devices - require explicit selection
-            device_list = ", ".join(has_v1_device.keys())
-            raise HomeAssistantError(
-                f"Multiple V1 devices available ({device_list}). "
-                "Please specify device_id parameter."
-            )
+    async def handle_update_min_time_segment(call: ServiceCall) -> None:
+        """Handle update_min_time_segment service call."""
+        from datetime import datetime
 
-        # Explicit device_id provided
-        if device_id not in has_v1_device:
-            raise HomeAssistantError(f"V1 device '{device_id}' not found")
-
-        return has_v1_device[device_id]
-
-    async def handle_update_time_segment(call: ServiceCall) -> None:
-        """Handle update_time_segment service call."""
-        segment_id = int(call.data["segment_id"])
+        segment_id = call.data["segment_id"]
         batt_mode_str = str(call.data["batt_mode"])
         start_time_str = call.data["start_time"]
         end_time_str = call.data["end_time"]
         enabled = call.data["enabled"]
-        device_id = call.data.get("device_id")
+
+        if not (1 <= segment_id <= 9):
+            raise HomeAssistantError("segment_id must be between 1 and 9")
 
         _LOGGER.debug(
-            "handle_update_time_segment: segment_id=%d, batt_mode=%s, start=%s, end=%s, enabled=%s, device_id=%s",
+            "handle_update_min_time_segment: segment_id=%d, batt_mode=%s, start=%s, end=%s, enabled=%s",
             segment_id,
             batt_mode_str,
             start_time_str,
             end_time_str,
             enabled,
-            device_id,
         )
 
         # Convert batt_mode string to integer
@@ -558,8 +542,23 @@ async def _async_register_services(
                 "start_time and end_time must be in HH:MM format"
             ) from err
 
-        # Get the appropriate MIN coordinator
-        coordinator = get_coordinator(device_id)
+        if not isinstance(enabled, bool):
+            raise HomeAssistantError("enabled must be a boolean value")
+
+        # Find the first V1 API coordinator to use
+        coordinator = next(
+            (
+                coord
+                for coord in device_coordinators.values()
+                if coord.device_type in ("tlx", "mix") and coord.api_version == "v1"
+            ),
+            None,
+        )
+
+        if coordinator is None:
+            raise HomeAssistantError(
+                "No V1 API device found (requires TLX/MIX with token authentication)"
+            )
 
         try:
             await coordinator.update_time_segment(
@@ -579,11 +578,9 @@ async def _async_register_services(
                 f"Error updating time segment {segment_id}: {err}"
             ) from err
 
-    async def handle_read_time_segments(call: ServiceCall) -> dict:
+    async def handle_read_min_time_segments(call: ServiceCall) -> dict:
         """Handle read_min_time_segments service call."""
         # Find the first V1 API coordinator to use
-
-        _LOGGER.info("XXXXX handle_read_time_segments() called")
         coordinator = next(
             (
                 coord
@@ -594,17 +591,18 @@ async def _async_register_services(
         )
 
         if coordinator is None:
-            raise HomeAssistantError("No V1 API device found (requires TLX/MIX with token authentication)")
+            raise HomeAssistantError(
+                "No V1 API device found (requires TLX/MIX with token authentication)"
+            )
 
         try:
             time_segments = await coordinator.read_time_segments()
             return {"time_segments": time_segments}
         except Exception as err:
             _LOGGER.error("Error reading time segments: %s", err)
-            raise HomeAssistantError(
-                f"Error reading time segments: {err}"
-            ) from err
+            raise HomeAssistantError(f"Error reading time segments: {err}") from err
 
+    # Define service fields with selectors for proper UI
     update_time_segment_fields = {
         vol.Required("segment_id"): selector.NumberSelector(
             selector.NumberSelectorConfig(
@@ -632,7 +630,7 @@ async def _async_register_services(
         hass.services.async_register(
             DOMAIN,
             "update_time_segment",
-            handle_update_time_segment,
+            handle_update_min_time_segment,
             schema=vol.Schema(update_time_segment_fields),
         )
         _LOGGER.info("Registered service: update_time_segment")
@@ -641,10 +639,11 @@ async def _async_register_services(
         hass.services.async_register(
             DOMAIN,
             "read_time_segments",
-            handle_read_time_segments,
+            handle_read_min_time_segments,
             supports_response=SupportsResponse.ONLY,
         )
         _LOGGER.info("Registered service: read_time_segments")
+
 
 async def async_unload_entry(
     hass: HomeAssistant, config_entry: GrowattConfigEntry
