@@ -41,6 +41,7 @@ PLATFORMS = [
     Platform.NUMBER,
     Platform.SWITCH,
     Platform.TIME,
+    Platform.BUTTON,
 ]
 
 LOGIN_INVALID_AUTH_CODE = "502"
