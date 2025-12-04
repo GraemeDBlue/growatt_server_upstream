@@ -231,7 +231,7 @@ class GrowattApplySettingsButton(CoordinatorEntity[GrowattCoordinator], ButtonEn
                 )
 
                 await self.hass.async_add_executor_job(
-                    self.coordinator.api.write_time_segment,
+                    self.coordinator.api.write_parameter,
                     self.coordinator.device_id,
                     device_type,
                     "mix_ac_charge_time_period",
@@ -403,7 +403,7 @@ class GrowattApplySettingsButton(CoordinatorEntity[GrowattCoordinator], ButtonEn
                 )
 
                 await self.hass.async_add_executor_job(
-                    self.coordinator.api.write_time_segment,
+                    self.coordinator.api.write_parameter,
                     self.coordinator.device_id,
                     device_type,
                     "mix_ac_discharge_time_period",
