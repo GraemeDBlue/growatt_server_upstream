@@ -318,125 +318,20 @@ class GrowattSimpleSwitch(CoordinatorEntity[GrowattCoordinator], SwitchEntity):
         await self._async_set_state(False)
 
     async def _async_set_state(self, state: bool) -> None:
-        """Set the switch state."""
-        try:
-            # Convert boolean to API format (1 or 0)
-            enabled = 1 if state else 0
+        """Set the switch state (locally only - use Apply button to send to device)."""
+        # Convert boolean to API format (1 or 0)
+        enabled_int = 1 if state else 0
 
-            # Use write_key if specified, otherwise fall back to api_key
-            parameter_id = (
-                self.entity_description.write_key or self.entity_description.api_key
-            )
+        # Use write_key if specified, otherwise fall back to api_key
+        parameter_id = (
+            self.entity_description.write_key or self.entity_description.api_key
+        )
 
-            # Determine if this is a charge or discharge enable switch
-            is_charge = "Charge" in parameter_id or "charge" in parameter_id
+        # Update the value in coordinator data
+        self.coordinator.data[parameter_id] = enabled_int
 
-            if is_charge:
-                # Get all current charge time period values
-                charge_power = int(self.coordinator.data.get("chargePowerCommand", 0))
-                charge_stop_soc = int(
-                    self.coordinator.data.get("wchargeSOCLowLimit1", 100)
-                )
-                mains_enabled = bool(
-                    int(self.coordinator.data.get("acChargeEnable", 0))
-                )
-
-                # Parse charge time strings
-                charge_start_str = self.coordinator.data.get(
-                    "forcedChargeTimeStart1", "00:00"
-                )
-                charge_end_str = self.coordinator.data.get(
-                    "forcedChargeTimeStop1", "00:00"
-                )
-
-                charge_start_parts = charge_start_str.split(":")
-                charge_start_hour = int(charge_start_parts[0])
-                charge_start_minute = int(charge_start_parts[1])
-
-                charge_end_parts = charge_end_str.split(":")
-                charge_end_hour = int(charge_end_parts[0])
-                charge_end_minute = int(charge_end_parts[1])
-
-                # Create parameter object with all charge period 1 values
-                params = OpenApiV1.MixAcChargeTimeParams(
-                    charge_power=charge_power,
-                    charge_stop_soc=charge_stop_soc,
-                    mains_enabled=mains_enabled,
-                    start_hour=charge_start_hour,
-                    start_minute=charge_start_minute,
-                    end_hour=charge_end_hour,
-                    end_minute=charge_end_minute,
-                    enabled=state,
-                    segment_id=1,
-                )
-
-                # Use V1 API to write all charge parameters
-                await self.hass.async_add_executor_job(
-                    self.coordinator.api.write_parameter,
-                    self.coordinator.device_id,
-                    DeviceType.SPH_MIX,
-                    "mix_ac_charge_time_period",
-                    params,
-                )
-
-                _LOGGER.debug("Set charge period 1 enabled to %s", enabled)
-            else:
-                # Get all current discharge time period values
-                discharge_power = int(
-                    self.coordinator.data.get("disChargePowerCommand", 0)
-                )
-                discharge_stop_soc = int(
-                    self.coordinator.data.get("loadFirstStopSocSet", 10)
-                )
-
-                # Parse discharge time strings
-                discharge_start_str = self.coordinator.data.get(
-                    "forcedDischargeTimeStart1", "00:00"
-                )
-                discharge_end_str = self.coordinator.data.get(
-                    "forcedDischargeTimeStop1", "00:00"
-                )
-
-                discharge_start_parts = discharge_start_str.split(":")
-                discharge_start_hour = int(discharge_start_parts[0])
-                discharge_start_minute = int(discharge_start_parts[1])
-
-                discharge_end_parts = discharge_end_str.split(":")
-                discharge_end_hour = int(discharge_end_parts[0])
-                discharge_end_minute = int(discharge_end_parts[1])
-
-                # Create parameter object with all discharge period 1 values
-                params = OpenApiV1.MixAcDischargeTimeParams(
-                    discharge_power=discharge_power,
-                    discharge_stop_soc=discharge_stop_soc,
-                    start_hour=discharge_start_hour,
-                    start_minute=discharge_start_minute,
-                    end_hour=discharge_end_hour,
-                    end_minute=discharge_end_minute,
-                    enabled=state,
-                    segment_id=1,
-                )
-
-                # Use V1 API to write all discharge parameters
-                await self.hass.async_add_executor_job(
-                    self.coordinator.api.write_parameter,
-                    self.coordinator.device_id,
-                    DeviceType.SPH_MIX,
-                    "mix_ac_discharge_time_period",
-                    params,
-                )
-
-                _LOGGER.debug("Set discharge period 1 enabled to %s", state)
-
-            # Update the value in coordinator (convert bool to int for storage)
-            enabled_int = 1 if state else 0
-            self.coordinator.set_value(self.entity_description, enabled_int)
-            self.async_write_ha_state()
-
-        except GrowattV1ApiError as e:
-            msg = f"Error while setting switch state: {e}"
-            _LOGGER.exception(msg)
-            raise HomeAssistantError(msg) from e
+        # Update the entity state in Home Assistant
+        self.async_write_ha_state()
 
 
 async def async_setup_entry(

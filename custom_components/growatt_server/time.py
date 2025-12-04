@@ -80,32 +80,14 @@ class GrowattChargeStartTimeEntity(CoordinatorEntity[GrowattCoordinator], TimeEn
             return time(14, 0)
 
     async def async_set_value(self, value: time) -> None:
-        """Update the time."""
-        try:
-            # Get current end time and other settings using correct field names
-            stop_field = self._get_field_name("stop_time")
-            enabled_field = self._get_field_name("enabled")
+        """Update the time (locally only - use Apply button to send to device)."""
+        # Update the local state in coordinator data
+        start_field = self._get_field_name("start_time")
+        time_str = f"{value.hour:02d}:{value.minute:02d}"
+        self.coordinator.data[start_field] = time_str
 
-            end_time_str = self.coordinator.data.get(stop_field, "16:00")
-            end_parts = end_time_str.split(":")
-            end_time = time(hour=int(end_parts[0]), minute=int(end_parts[1]))
-
-            enabled = bool(self.coordinator.data.get(enabled_field, 0))
-
-            # Update the time segment with new start time
-            await self.coordinator.update_time_segment(
-                segment_id=self._segment_id,
-                batt_mode=1,  # Battery first (charge)
-                start_time=value,
-                end_time=end_time,
-                enabled=enabled,
-            )
-
-            await self.coordinator.async_refresh()
-
-        except Exception as err:
-            _LOGGER.error("Error setting charge start time: %s", err)
-            raise HomeAssistantError(f"Error setting charge start time: {err}") from err
+        # Update the entity state in Home Assistant
+        self.async_write_ha_state()
 
 
 class GrowattChargeEndTimeEntity(CoordinatorEntity[GrowattCoordinator], TimeEntity):
@@ -146,32 +128,14 @@ class GrowattChargeEndTimeEntity(CoordinatorEntity[GrowattCoordinator], TimeEnti
             return time(16, 0)
 
     async def async_set_value(self, value: time) -> None:
-        """Update the time."""
-        try:
-            # Get current start time and other settings using correct field names
-            start_field = self._get_field_name("start_time")
-            enabled_field = self._get_field_name("enabled")
+        """Update the time (locally only - use Apply button to send to device)."""
+        # Update the local state in coordinator data
+        stop_field = self._get_field_name("stop_time")
+        time_str = f"{value.hour:02d}:{value.minute:02d}"
+        self.coordinator.data[stop_field] = time_str
 
-            start_time_str = self.coordinator.data.get(start_field, "14:00")
-            start_parts = start_time_str.split(":")
-            start_time = time(hour=int(start_parts[0]), minute=int(start_parts[1]))
-
-            enabled = bool(self.coordinator.data.get(enabled_field, 0))
-
-            # Update the time segment with new end time
-            await self.coordinator.update_time_segment(
-                segment_id=self._segment_id,
-                batt_mode=1,  # Battery first (charge)
-                start_time=start_time,
-                end_time=value,
-                enabled=enabled,
-            )
-
-            await self.coordinator.async_refresh()
-
-        except Exception as err:
-            _LOGGER.error("Error setting charge end time: %s", err)
-            raise HomeAssistantError(f"Error setting charge end time: {err}") from err
+        # Update the entity state in Home Assistant
+        self.async_write_ha_state()
 
 
 class GrowattDischargeStartTimeEntity(
@@ -216,41 +180,14 @@ class GrowattDischargeStartTimeEntity(
             return time(0, 0)
 
     async def async_set_value(self, value: time) -> None:
-        """Update the time."""
-        try:
-            # Get current end time and other settings using correct field names
-            stop_field = self._get_field_name("stop_time")
-            enabled_field = self._get_field_name("enabled")
+        """Update the time (locally only - use Apply button to send to device)."""
+        # Update the local state in coordinator data
+        start_field = self._get_field_name("start_time")
+        time_str = f"{value.hour:02d}:{value.minute:02d}"
+        self.coordinator.data[start_field] = time_str
 
-            end_time_str = self.coordinator.data.get(stop_field, "00:00")
-            end_parts = end_time_str.split(":")
-            end_time = time(hour=int(end_parts[0]), minute=int(end_parts[1]))
-
-            enabled = bool(self.coordinator.data.get(enabled_field, 0))
-
-            # For MIX devices, discharge uses segments 7-12 (offset by 6)
-            # For TLX devices, it's just the segment_id
-            if self.coordinator.device_type == "mix":
-                segment_id = self._segment_id + 6
-            else:
-                segment_id = self._segment_id
-
-            # Update the time segment with new start time
-            await self.coordinator.update_time_segment(
-                segment_id=segment_id,
-                batt_mode=2,  # Grid first (discharge)
-                start_time=value,
-                end_time=end_time,
-                enabled=enabled,
-            )
-
-            await self.coordinator.async_refresh()
-
-        except Exception as err:
-            _LOGGER.error("Error setting discharge start time: %s", err)
-            raise HomeAssistantError(
-                f"Error setting discharge start time: {err}"
-            ) from err
+        # Update the entity state in Home Assistant
+        self.async_write_ha_state()
 
 
 class GrowattDischargeEndTimeEntity(CoordinatorEntity[GrowattCoordinator], TimeEntity):
@@ -293,41 +230,14 @@ class GrowattDischargeEndTimeEntity(CoordinatorEntity[GrowattCoordinator], TimeE
             return time(0, 0)
 
     async def async_set_value(self, value: time) -> None:
-        """Update the time."""
-        try:
-            # Get current start time and other settings using correct field names
-            start_field = self._get_field_name("start_time")
-            enabled_field = self._get_field_name("enabled")
+        """Update the time (locally only - use Apply button to send to device)."""
+        # Update the local state in coordinator data
+        stop_field = self._get_field_name("stop_time")
+        time_str = f"{value.hour:02d}:{value.minute:02d}"
+        self.coordinator.data[stop_field] = time_str
 
-            start_time_str = self.coordinator.data.get(start_field, "00:00")
-            start_parts = start_time_str.split(":")
-            start_time = time(hour=int(start_parts[0]), minute=int(start_parts[1]))
-
-            enabled = bool(self.coordinator.data.get(enabled_field, 0))
-
-            # For MIX devices, discharge uses segments 7-12 (offset by 6)
-            # For TLX devices, it's just the segment_id
-            if self.coordinator.device_type == "mix":
-                segment_id = self._segment_id + 6
-            else:
-                segment_id = self._segment_id
-
-            # Update the time segment with new end time
-            await self.coordinator.update_time_segment(
-                segment_id=segment_id,
-                batt_mode=2,  # Grid first (discharge)
-                start_time=start_time,
-                end_time=value,
-                enabled=enabled,
-            )
-
-            await self.coordinator.async_refresh()
-
-        except Exception as err:
-            _LOGGER.error("Error setting discharge end time: %s", err)
-            raise HomeAssistantError(
-                f"Error setting discharge end time: {err}"
-            ) from err
+        # Update the entity state in Home Assistant
+        self.async_write_ha_state()
 
 
 async def async_setup_entry(

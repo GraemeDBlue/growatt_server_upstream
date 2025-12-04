@@ -276,6 +276,14 @@
         "name": "Discharge period 1 enabled"
       }
     },
+    "button": {
+      "apply_charge_settings": {
+        "name": "Apply charge settings"
+      },
+      "apply_discharge_settings": {
+        "name": "Apply discharge settings"
+      }
+    },
     "time": {
       "charge_start_time": {
         "name": "1. Charge start time"
